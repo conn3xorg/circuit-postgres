@@ -59,14 +59,16 @@ To try it on a throwaway container first, see [examples/local](examples/local).
 On each host, in order:
 
 1. Adds the PGDG repository and its signing key, from the keys in [files](files): `apt.postgresql.org` on Debian and Ubuntu, `download.postgresql.org` on Rocky Linux, AlmaLinux and RHEL. On Fedora it uses Fedora's own packages instead (see below).
-2. Installs the server for `postgres_version`: `postgresql-18` on Debian and Ubuntu, `postgresql18-server` on the Red Hat family.
-3. Creates the cluster if it doesn't exist. Debian and Ubuntu do this when the package installs; on the Red Hat family the circuit runs `postgresql-18-setup initdb`, or `postgresql-setup --initdb` on Fedora, once.
-4. Turns on `include_dir = 'conf.d'` in `postgresql.conf` and writes `conf.d/conn3x.conf` from `listen_addresses` and `settings`.
-5. Writes `pg_hba.conf` from `hba`, with one rule ahead of yours: `local all postgres peer`, which the circuit needs to manage roles.
-6. Restarts PostgreSQL when `conn3x.conf` or the include line changed, then keeps it running and enabled at boot. Restarting on any settings change is deliberate: `listen_addresses`, `port`, `shared_buffers` and plenty of others do nothing until a restart.
-7. For each of `users`, writes its password to `/etc/conn3x/postgres/NAME` (root only, mode 0600), creates the role with `LOGIN`, and sets the password whenever that file changed.
-8. Creates each of `databases` with its owner, or changes the owner of one that exists.
-9. Reloads PostgreSQL when `pg_hba.conf` changed, after everything else, so open connections survive.
+2. On the Red Hat family, before PostgreSQL starts, when `settings` sets a `port` other than 5432, installs `policycoreutils-python-utils` and labels the port `postgresql_port_t` with `semanage`, so SELinux lets PostgreSQL bind it. Hosts with SELinux off skip the label.
+3. Installs the server for `postgres_version`: `postgresql-18` on Debian and Ubuntu, `postgresql18-server` on the Red Hat family.
+4. Creates the cluster if it doesn't exist. Debian and Ubuntu do this when the package installs; on the Red Hat family the circuit runs `postgresql-18-setup initdb`, or `postgresql-setup --initdb` on Fedora, once.
+5. Turns on `include_dir = 'conf.d'` in `postgresql.conf` and writes `conf.d/conn3x.conf` from `listen_addresses` and `settings`.
+6. Writes `pg_hba.conf` from `hba`, with one rule ahead of yours: `local all postgres peer`, which the circuit needs to manage roles.
+7. Checks the new files before anything restarts or reloads. `postgres -C` parses the configuration the way a server start would, and the running server reads `pg_hba.conf` through `pg_hba_file_rules`. A misspelt setting, a bad value such as `shared_buffers = "1 GiB"` or a rule PostgreSQL rejects fails the apply with PostgreSQL's own message, and the server keeps running on what it had. Fix the input and apply again. On a first apply there's no server running to ask about `pg_hba.conf`, so a bad rule fails the start instead.
+8. Restarts PostgreSQL when `conn3x.conf` or the include line changed, then keeps it running and enabled at boot. Restarting on any settings change is deliberate: `listen_addresses`, `port`, `shared_buffers` and plenty of others do nothing until a restart.
+9. For each of `users`, writes its password to `/etc/conn3x/postgres/NAME` (root only, mode 0600), creates the role with `LOGIN`, and sets the password whenever that file changed.
+10. Creates each of `databases` with its owner, or changes the owner of one that exists.
+11. Reloads PostgreSQL when `pg_hba.conf` changed, after everything else, so open connections survive.
 
 The circuit runs `psql` as `postgres` over the local socket. A password reaches `psql` on standard input, so it never shows up in `ps`, and the server stores only its SCRAM hash. It does travel through the server's statement handling, so don't turn on `log_statement = 'all'` while you change one.
 
@@ -107,7 +109,7 @@ PGDG doesn't publish packages for Fedora 45, or for Fedora on arm64, so on Fedor
 | `postgres_version` | number | `18` | Major version to install: 14, 15, 16, 17 or 18. |
 | `listen_addresses` | string | `"localhost"` | Addresses to listen on, comma-separated, such as `"*"` or `"127.0.0.1,10.0.0.5"`. Changing it restarts PostgreSQL. |
 | `settings` | map(string) | `{}` | `postgresql.conf` settings, such as `{ shared_buffers = "1GB" }`. Changing them restarts PostgreSQL. Set `listen_addresses` with its own input. |
-| `hba` | list(object) | Local peer, and scram-sha-256 from `127.0.0.1` and `::1` | `pg_hba.conf` rules, in order. Each has `type`, `database`, `user`, `method`, and `address` for every type but `local`. `method` is one of `trust`, `reject`, `scram-sha-256`, `md5`, `password`, `gss`, `sspi`, `ident`, `peer`, `pam`, `ldap`, `radius` or `cert`. Changing them reloads PostgreSQL. |
+| `hba` | list(object) | Local peer, and scram-sha-256 from `127.0.0.1` and `::1` | `pg_hba.conf` rules, in order. Each has `type`, `database`, `user`, `method`, and `address` for every type but `local`. An address with a `/` must be a valid CIDR network. `method` is one of `trust`, `reject`, `scram-sha-256`, `md5`, `password`, `gss`, `sspi`, `ident`, `peer`, `pam`, `ldap`, `radius` or `cert`. Changing them reloads PostgreSQL. |
 | `users` | list(string) | `[]` | Roles to create with `LOGIN`. Names use lowercase letters, digits and `_`, and can't start with `pg_`. |
 | `user_passwords` | map(string), ephemeral | `{}` | Password for each of `users`, by name. Every user needs one. |
 | `databases` | map(string) | `{}` | Databases to create, each mapped to its owner, such as `{ app = "app" }`. The owner must be one of `users` or a role that already exists. |
@@ -125,7 +127,9 @@ Requires Conn3x v0.6.5 or later and systemd on each host, with outbound HTTPS to
 
 ## Tested on
 
-Rocky Linux 10, Fedora 45, Ubuntu 24.04 and Debian 13, with PostgreSQL 18. CI applies [examples/local](examples/local) to each on amd64, checks that the second plan has no changes, and connects over TCP as the example's user with its password. The same was run by hand on arm64.
+Rocky Linux 10, Fedora 45, Ubuntu 24.04 and Debian 13, with PostgreSQL 18. CI applies [examples/local](examples/local) to each on amd64, checks that the second plan has no changes, and connects over TCP as the example's user with its password. The same was run by hand on arm64, along with a misspelt setting, a bad value and a rejected `pg_hba.conf` rule, each of which failed the apply and left the server running, and a move to port 5433.
+
+All of that ran in containers, where SELinux is off. The `semanage` step for a non-default port hasn't been tested on a host with SELinux enforcing yet.
 
 ## License
 

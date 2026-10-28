@@ -64,6 +64,8 @@ locals {
   ))
 
   password_dir = "/etc/conn3x/postgres"
+
+  hba_check = "SELECT concat('pg_hba.conf line ', line_number, ': ', error) FROM pg_hba_file_rules WHERE error IS NOT NULL"
 }
 
 # PGDG's apt repository. Each Debian and Ubuntu release has its own suite.
@@ -147,6 +149,36 @@ circuit "postgres_fedora" {
   }
 }
 
+# SELinux only lets PostgreSQL bind ports labelled postgresql_port_t, which
+# 5432 already is. Another port gets the label here, on hosts where SELinux
+# is on.
+circuit "postgres_selinux" {
+  hosts = merge(local.el_hosts, local.fedora_hosts)
+
+  ssh {
+    user             = var.ssh_user
+    port             = var.ssh_port
+    private_key_file = var.ssh_private_key_file
+    known_hosts_file = var.ssh_known_hosts_file
+    become           = var.ssh_become
+  }
+
+  step "semanage" {
+    for_each = local.port == "5432" ? [] : ["policycoreutils-python-utils"]
+    package {
+      name = item.value
+    }
+  }
+
+  step "port" {
+    for_each = local.port == "5432" ? [] : [local.port]
+    command {
+      command = "semanage port -a -t postgresql_port_t -p tcp ${item.value} || semanage port -m -t postgresql_port_t -p tcp ${item.value}"
+      unless  = "! selinuxenabled || semanage port -l | awk '$1 == \"postgresql_port_t\" && $2 == \"tcp\"' | grep -qw ${item.value}"
+    }
+  }
+}
+
 circuit "postgres" {
   hosts = var.hosts
 
@@ -165,7 +197,7 @@ circuit "postgres" {
       command = local.hosts[each.key].initdb
       creates = "${local.hosts[each.key].data}/PG_VERSION"
     }
-    depends_on = [conn3x_package.postgres_apt__server, conn3x_package.postgres_el__server, conn3x_package.postgres_fedora__server]
+    depends_on = [conn3x_package.postgres_apt__server, conn3x_package.postgres_el__server, conn3x_package.postgres_fedora__server, conn3x_command.postgres_selinux__port]
   }
 
   step "include_dir" {
@@ -204,6 +236,25 @@ circuit "postgres" {
       mode    = "0600"
     }
     notify = [handler.reload]
+  }
+
+  # Before anything restarts or reloads, checks the new files. postgres -C
+  # parses the configuration as a server start would, so an unknown setting
+  # or a bad value fails the apply and the running server keeps what it had.
+  # pg_hba.conf is checked by the running server, through pg_hba_file_rules,
+  # which parses the file on disk; on a first apply there's no server yet,
+  # and a bad rule fails the restart instead. psql connects on the port the
+  # server runs on now, from postmaster.pid, which differs from the
+  # configured one while a port change is pending.
+  step "check" {
+    command {
+      command = "cd / && runuser -u postgres -- ${local.hosts[each.key].bin}/postgres -D ${local.hosts[each.key].conf} -C data_directory >/dev/null || exit 1; systemctl is-active -q ${local.hosts[each.key].service} || exit 0; out=$(runuser -u postgres -- ${local.hosts[each.key].bin}/psql -X -tA -p \"$(sed -n 4p ${local.hosts[each.key].data}/postmaster.pid)\" -v ON_ERROR_STOP=1 -c \"${local.hba_check}\") || exit 1; [ -z \"$out\" ] || { echo \"$out\" >&2; exit 1; }"
+      triggers = {
+        include_dir = conn3x_line.postgres__include_dir[each.key].revision
+        config      = conn3x_file.postgres__config[each.key].revision
+        hba         = conn3x_file.postgres__hba[each.key].revision
+      }
+    }
   }
 
   # listen_addresses, port and many settings only take effect on a restart.

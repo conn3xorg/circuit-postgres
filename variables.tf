@@ -112,6 +112,11 @@ variable "hba" {
     condition     = alltrue([for r in var.hba : can(regex("^[^\\s#]+$", r.database)) && can(regex("^[^\\s#]+$", r.user)) && can(regex("^[^\\s#]+$", coalesce(r.address, "-")))])
     error_message = "database, user and address can't contain spaces or #."
   }
+
+  validation {
+    condition     = alltrue([for r in var.hba : !strcontains(coalesce(r.address, "-"), "/") || can(cidrhost(coalesce(r.address, "-"), 0))])
+    error_message = "An address with a / must be a valid CIDR network, such as \"10.0.0.0/8\" or \"fd00::/8\"."
+  }
 }
 
 variable "users" {
