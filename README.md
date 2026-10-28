@@ -129,7 +129,7 @@ Requires Conn3x v0.6.5 or later and systemd on each host, with outbound HTTPS to
 
 Rocky Linux 10, Fedora 45, Ubuntu 24.04 and Debian 13, with PostgreSQL 18. CI applies [examples/local](examples/local) to each on amd64, checks that the second plan has no changes, and connects over TCP as the example's user with its password. The same was run by hand on arm64, along with a misspelt setting, a bad value and a rejected `pg_hba.conf` rule, each of which failed the apply and left the server running, and a move to port 5433.
 
-All of that ran in containers, where SELinux is off. The `semanage` step for a non-default port hasn't been tested on a host with SELinux enforcing yet.
+All of that ran in containers, where SELinux is off. On a Rocky Linux 10 droplet with SELinux enforcing, a server on port 5433 was applied by hand: the circuit labelled 5433 `postgresql_port_t`, the second plan had no changes, `SELECT 1` worked over TCP, and the audit log had no denials. PGDG's server runs as `unconfined_service_t` there, so the label wasn't what let it bind. Fedora's own server runs confined, and it hasn't been tried with SELinux enforcing.
 
 ## License
 
