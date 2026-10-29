@@ -12,15 +12,27 @@ data "conn3x_host" "facts" {
     jump_hosts       = try(each.value.jump_hosts, null)
     known_hosts_file = var.ssh_known_hosts_file
   }
+
+  lifecycle {
+    postcondition {
+      condition     = try(each.value.os, self.os_id) == self.os_id
+      error_message = "Host ${each.key} is ${self.os_id}, not the ${try(each.value.os, "")} its os says."
+    }
+  }
 }
 
 locals {
+  # A host object's os stands in for the facts of a host created in the
+  # same plan, which can't be read until it exists.
+  os     = { for name, h in var.hosts : name => try(h.os, data.conn3x_host.facts[name].os_id) }
+  family = { for name, o in local.os : name => contains(["debian", "ubuntu"], o) ? "debian" : "redhat" }
+
   v        = var.postgres_version
   codename = { "22.04" = "jammy", "24.04" = "noble", "26.04" = "resolute", "12" = "bookworm", "13" = "trixie" }
 
-  apt_hosts    = { for name, h in var.hosts : name => h if data.conn3x_host.facts[name].os_family == "debian" }
-  fedora_hosts = { for name, h in var.hosts : name => h if data.conn3x_host.facts[name].os_id == "fedora" }
-  el_hosts     = { for name, h in var.hosts : name => h if data.conn3x_host.facts[name].os_family == "redhat" && data.conn3x_host.facts[name].os_id != "fedora" }
+  apt_hosts    = { for name, h in var.hosts : name => h if local.family[name] == "debian" }
+  fedora_hosts = { for name, h in var.hosts : name => h if local.os[name] == "fedora" }
+  el_hosts     = { for name, h in var.hosts : name => h if local.family[name] == "redhat" && local.os[name] != "fedora" }
 
   # Where each host's cluster lives. Debian and Ubuntu keep the configuration
   # in /etc and create the cluster when the package installs; the Red Hat
