@@ -1,5 +1,7 @@
 # circuit-postgres
 
+[![Conn3x grade](https://conn3x.org/circuits/postgres/grade.svg)](https://conn3x.org/circuits/postgres/grade)
+
 A Conn3x circuit that installs PostgreSQL from the PostgreSQL project's own repositories, sets up the cluster, and creates the roles and databases your apps log in with. You get the current major on Rocky Linux, Ubuntu and Debian rather than whatever the distribution froze at release, and a config you can review in `conn3x plan` before it reaches the server.
 
 Passwords never land in state. You pass them in at run time through an ephemeral variable, and the plan shows only that a password changed.
