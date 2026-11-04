@@ -85,7 +85,19 @@ jobs:
             exit 1
           fi
       - name: Connect over TCP as app
-        run: sudo podman exec -e PGPASSWORD=ci-only-password circuit-postgres psql -h 127.0.0.1 -U app -d app -tAc 'SELECT 1' | grep -qx 1
+        run: &connect sudo podman exec -e PGPASSWORD=ci-only-password circuit-postgres psql -h 127.0.0.1 -U app -d app -tAc 'SELECT 1' | grep -qx 1
+      # Restarting the container boots systemd again, so this checks
+      # PostgreSQL is enabled and comes back with its config and data.
+      - name: Restart the host, then wait for PostgreSQL
+        run: |
+          sudo podman restart circuit-postgres
+          sudo podman exec circuit-postgres timeout 60 systemctl is-system-running --wait || true
+          for _ in $(seq 30); do
+            sudo podman exec -e PGPASSWORD=ci-only-password circuit-postgres psql -h 127.0.0.1 -U app -d app -tAc 'SELECT 1' >/dev/null 2>&1 && break
+            sleep 1
+          done
+      - name: Connect over TCP as app after the restart
+        run: *connect
       - name: Clean up
         if: always()
         working-directory: examples/local
