@@ -126,7 +126,7 @@ PGDG doesn't publish packages for Fedora 45, or for Fedora on arm64, so on Fedor
 
 ## Requirements
 
-Requires Conn3x v0.6.5 or later and systemd on each host, with outbound HTTPS to apt.postgresql.org or download.postgresql.org, or to Fedora's mirrors on Fedora.
+Requires Conn3x v0.27.0 or later and systemd on each host, with outbound HTTPS to apt.postgresql.org or download.postgresql.org, or to Fedora's mirrors on Fedora.
 
 ## Tested on
 

@@ -184,9 +184,9 @@ circuit "postgres_selinux" {
 
   step "port" {
     for_each = local.port == "5432" ? [] : [local.port]
-    command {
-      command = "semanage port -a -t postgresql_port_t -p tcp ${item.value} || semanage port -m -t postgresql_port_t -p tcp ${item.value}"
-      unless  = "! selinuxenabled || semanage port -l | awk '$1 == \"postgresql_port_t\" && $2 == \"tcp\"' | grep -qw ${item.value}"
+    selinux_port {
+      port   = item.value
+      setype = "postgresql_port_t"
     }
   }
 }
@@ -209,7 +209,7 @@ circuit "postgres" {
       command = local.hosts[each.key].initdb
       creates = "${local.hosts[each.key].data}/PG_VERSION"
     }
-    depends_on = [conn3x_package.postgres_apt__server, conn3x_package.postgres_el__server, conn3x_package.postgres_fedora__server, conn3x_command.postgres_selinux__port]
+    depends_on = [conn3x_package.postgres_apt__server, conn3x_package.postgres_el__server, conn3x_package.postgres_fedora__server, conn3x_selinux_port.postgres_selinux__port]
   }
 
   step "include_dir" {
