@@ -274,8 +274,8 @@ circuit "postgres" {
   # on the configured port, find the server running with the new settings.
   # On a first apply it's what starts the server.
   step "restart" {
-    command {
-      command = "systemctl restart ${local.hosts[each.key].service}"
+    service_action {
+      name = local.hosts[each.key].service
       triggers = {
         include_dir = conn3x_line.postgres__include_dir[each.key].revision
         config      = conn3x_file.postgres__config[each.key].revision
